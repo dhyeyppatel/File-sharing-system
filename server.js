@@ -148,6 +148,39 @@ app.get('/export/:code', requireApiKey, (req, res) => {
   res.json({ ok:true, bundle });
 });
 
+// PATCH /bundles/:code - update bundle metadata (finalized_at, files_count, header_msg_id, etc.)
+app.patch('/bundles/:code', requireApiKey, (req, res) => {
+  try {
+    const code = req.params.code;
+    const body = req.body || {};
+    // Only allow certain fields to be updated
+    const allowed = ['finalized_at', 'files_count', 'header_msg_id', 'header_chat_id', 'owner_name', 'owner_id'];
+    const fields = Object.keys(body).filter(k => allowed.includes(k));
+
+    if (fields.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No allowed fields provided' });
+    }
+
+    // Build SET clause
+    const sets = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => body[f]);
+    values.push(code); // WHERE param
+
+    const stmt = db.prepare(`UPDATE bundles SET ${sets} WHERE id = ?`);
+    const info = stmt.run(...values);
+
+    if (info.changes === 0) {
+      return res.status(404).json({ ok: false, error: 'Bundle not found' });
+    }
+
+    const updated = db.prepare(`SELECT * FROM bundles WHERE id = ?`).get(code);
+    res.json({ ok: true, bundle: updated });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
