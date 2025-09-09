@@ -180,6 +180,31 @@ app.patch('/bundles/:code', requireApiKey, (req, res) => {
   }
 });
 
+// POST /bundles/:code/finalize - convenience endpoint for bots that cannot issue PATCH
+app.post('/bundles/:code/finalize', requireApiKey, (req, res) => {
+  try {
+    const code = req.params.code;
+    const now = req.body.finalized_at || Date.now();
+    const files_count = typeof req.body.files_count !== 'undefined' ? req.body.files_count : null;
+    const updates = ['finalized_at = ?'];
+    const values = [now];
+
+    if (files_count !== null) {
+      updates.push('files_count = ?');
+      values.push(files_count);
+    }
+
+    values.push(code);
+    const stmt = db.prepare(`UPDATE bundles SET ${updates.join(', ')} WHERE id = ?`);
+    const info = stmt.run(...values);
+    if (info.changes === 0) return res.status(404).json({ ok: false, error: 'Bundle not found' });
+    const updated = db.prepare(`SELECT * FROM bundles WHERE id = ?`).get(code);
+    res.json({ ok: true, bundle: updated });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
