@@ -1,16 +1,23 @@
-// server.js - simple bundles API (SQLite + Express)
+// server.js - simple bundles API (SQLite + Express) - no nanoid dependency
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const Database = require('better-sqlite3');
-const { nanoid } = require('nanoid');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY || ""; // set this on Render/Replit for security
+const API_KEY = process.env.API_KEY || ""; // set this on Render for security
+
+// helper: generate short id (8 chars) - URL safe base36-ish
+function makeId(len = 8) {
+  // use random bytes, convert to base36 string, trim
+  const bytes = crypto.randomBytes(Math.ceil(len * 0.6));
+  return parseInt(bytes.toString('hex'), 16).toString(36).slice(0, len);
+}
 
 // open or create SQLite DB
 const db = new Database('data.db');
@@ -59,7 +66,7 @@ app.get('/health', (req, res) => {
 app.post('/bundles', requireApiKey, (req, res) => {
   try {
     const { id, owner_id, owner_name, header_chat_id, header_msg_id, created_at } = req.body;
-    const bundleId = id || nanoid(8);
+    const bundleId = id && id.toString().trim().length ? id.toString().trim() : makeId(8);
     const now = created_at || Date.now();
     const stmt = db.prepare(`
       INSERT INTO bundles (id, owner_id, owner_name, header_chat_id, header_msg_id, created_at, files_count)
@@ -77,13 +84,14 @@ app.post('/bundles', requireApiKey, (req, res) => {
 app.post('/files', requireApiKey, (req, res) => {
   try {
     const { code, channel_msg_id, header_chat_id, caption, added_at } = req.body;
+    if (!code) return res.status(400).json({ ok: false, error: "Missing code" });
     const now = added_at || Date.now();
     const insert = db.prepare(`
       INSERT INTO files (code, channel_msg_id, header_chat_id, caption, added_at)
       VALUES (?, ?, ?, ?, ?)
     `);
     const info = insert.run(code, channel_msg_id, header_chat_id || "", caption || "", now);
-    // increment files_count
+    // increment files_count (if bundle exists)
     db.prepare(`UPDATE bundles SET files_count = files_count + 1 WHERE id = ?`).run(code);
     res.json({
       ok: true,
@@ -130,7 +138,7 @@ app.get('/bundles/:code/files', requireApiKey, (req, res) => {
   }
 });
 
-// optional: export bundle JSON (GET /export/:code)
+// export bundle JSON (GET /export/:code)
 app.get('/export/:code', requireApiKey, (req, res) => {
   const code = req.params.code;
   const bundle = db.prepare(`SELECT * FROM bundles WHERE id = ?`).get(code);
